@@ -1,4 +1,4 @@
-function bGui()
+function DetectionGUI()
 % Create figure
 f = figure('Name', 'Point Cloud Window', 'NumberTitle', 'off');
 ax = axes(f);
@@ -34,44 +34,66 @@ planeOption = uimenu(vizOptionsMenu, 'Label', 'Plane', 'Callback', @(src, event)
 meshOption = uimenu(vizOptionsMenu, 'Label', 'Mesh', 'Callback', @(src, event) mesh_option_callback(src, event, f, ax));
 flattenParabolicOption = uimenu(vizOptionsMenu, 'Label', 'Flat', 'Callback', @(src, event) flatten_parabolic_callback(src, event, f, ax));
 end
+
 function flatten_parabolic_callback(~, ~, f, ax)
- if isfield(f.UserData, 'pcData') && ~isempty(f.UserData.pcData)
- pcData = f.UserData.pcData.Location;
- colorData = f.UserData.pcData.Color; % Extract color data
- % Check if intensity data is available
- if isfield(f.UserData.pcData, 'Intensity')
- intensityData = f.UserData.pcData.Intensity;
- else
- intensityData = [];
- end
- % Fit a parabolic surface of the form z = ax^2 + by^2 + c
- % to the point cloud data
- X = [pcData(:,1).^2, pcData(:,2).^2, ones(size(pcData,1),1)];
- abc = X \ pcData(:,3); % Least squares solution
- % Compute the z-values of the fitted parabolic surface
- fittedZ = abc(1)*pcData(:,1).^2 + abc(2)*pcData(:,2).^2 + abc(3);
- % Subtract the fitted parabolic surface from the original z-values
- % to flatten the primary curvature
- flattenedZ = pcData(:,3) - fittedZ;
- % Create the new point cloud data with the flattened z-values
- flattenedPoints = [pcData(:,1:2), flattenedZ];
- % Create a new point cloud
- if isempty(intensityData)
- flattenedPC = pointCloud(flattenedPoints, 'Color', colorData);
- else
- flattenedPC = pointCloud(flattenedPoints, 'Color', colorData, 'Intensity', intensityData);
- end
- % Visualize the new, flattened point cloud
- pcshow(flattenedPC, 'Parent', ax);
- hold on;
- axis(ax, 'equal');
- hold off;
- % Store the flattened point cloud in the UserData
- f.UserData.pcData = flattenedPC;
- else
- errordlg('No point cloud data available for fitting a plane!', 'Error');
- end
+    if isfield(f.UserData, 'pcData') && ~isempty(f.UserData.pcData)
+        pcData = f.UserData.pcData.Location;
+        colorData = f.UserData.pcData.Color; % Extract color data
+
+        % Check if intensity data is available
+        if isfield(f.UserData.pcData, 'Intensity')
+            intensityData = f.UserData.pcData.Intensity;
+        else
+            intensityData = [];
+        end
+
+        % Normalize the data for better numerical stability
+        pcDataMean = mean(pcData, 1);
+        pcDataStd = std(pcData, 0, 1);
+        normPcData = (pcData - pcDataMean) ./ pcDataStd;
+
+        % Fit a parabolic surface of the form z = ax^2 + by^2 + c to the point cloud data
+        X = [normPcData(:,1).^2, normPcData(:,2).^2, ones(size(normPcData,1),1)];
+        [abc, R] = lscov(X, normPcData(:,3)); % Weighted least squares solution
+
+        % Check if the matrix is rank deficient
+        if rank(R) < size(R, 2)
+            warning('Rank deficient, the fit may not be accurate.');
+        end
+
+        % Compute the z-values of the fitted parabolic surface
+        fittedZ = abc(1)*normPcData(:,1).^2 + abc(2)*normPcData(:,2).^2 + abc(3);
+
+        % Subtract the fitted parabolic surface from the original z-values to flatten the primary curvature
+        flattenedZ = normPcData(:,3) - fittedZ;
+
+        % Denormalize the flattened Z values
+        denormFlattenedZ = flattenedZ * pcDataStd(3) + pcDataMean(3);
+
+        % Create the new point cloud data with the flattened z-values
+        flattenedPoints = [pcData(:,1:2), denormFlattenedZ];
+
+        % Create a new point cloud
+        if isempty(intensityData)
+            flattenedPC = pointCloud(flattenedPoints, 'Color', colorData);
+        else
+            flattenedPC = pointCloud(flattenedPoints, 'Color', colorData, 'Intensity', intensityData);
+        end
+
+        % Visualize the new, flattened point cloud
+        pcshow(flattenedPC, 'Parent', ax);
+        hold on;
+        axis(ax, 'equal');
+        hold off;
+
+        % Store the flattened point cloud in the UserData
+        f.UserData.pcData = flattenedPC;
+    else
+        errordlg('No point cloud data available for fitting a plane!', 'Error');
+    end
 end
+
+
 function mesh_option_callback(~, ~, f, ax)
 % Check if point cloud data exists
 if isfield(f.UserData, 'pcData') && ~isempty(f.UserData.pcData)
@@ -110,10 +132,12 @@ for i = 1:size(pts, 1)
  vertexColors(i, :) = colorData(closestPointIdx, :);
 end
 end
+
 % Logic for "Grid" option
 function grid_option_callback(~, ~, ax)
 grid(ax, 'on');
 end
+
 % Logic for "Depth" option
 function depth_option_callback(~, ~, f, ax)
 if ~isempty(f.UserData.pcData)
@@ -122,6 +146,7 @@ if ~isempty(f.UserData.pcData)
  pcshow(pc, 'Parent', ax);
 end
 end
+
 % Logic for "Reset" option
 function reset_option_callback(~, ~, f, ax)
 if isfield(f.UserData, 'originalPcData') && ~isempty(f.UserData.originalPcData)
@@ -134,6 +159,7 @@ else
  errordlg('No original data to reset to!', 'Error');
 end
 end
+
 % Logic for "Densify" option
 function densify_option_callback(~, ~, f, ax)
 if isfield(f.UserData, 'pcData') && ~isempty(f.UserData.pcData)
@@ -171,27 +197,7 @@ else
  errordlg('No point cloud data available for densifying!', 'Error');
 end
 end
-% Logic for "Defect" option
-% function defect_option_callback(~, ~, f, ax)
-% neuralNetModel = f.UserData.neuralNetModel; % Retrieve the model from UserData
-% if isempty(f.UserData.pcData)
-% errordlg('No data to process!', 'Error');
-% return;
-% end
-% Get the point cloud data
-% pcData = f.UserData.pcData;
-% Here, make a call to neural network model to get predictions
-% Preprocess data as required and then use the model to predict
-% For example:
-% predictions = classify(neuralNetModel, pcData.Location);
-% Assuming predictions is a binary matrix where 1 indicates defects
-% defectIndices = find(predictions == 1);
-% defectPoints = select(pcData, defectIndices);
-% Highlight defects based on Z-depth
-% z = defectPoints.Location(:, 3);
-% colormap(ax, 'jet'); % Using jet colormap, adjust as needed
-% pcshow(defectPoints, 'Parent', ax, 'CData', z);
-% end
+
 function plane_option_callback(~, ~, f, ax)
  % Check if point cloud data exists
  if isfield(f.UserData, 'pcData') && ~isempty(f.UserData.pcData)
@@ -260,6 +266,7 @@ else % Assume just XYZ data
  pc = pointCloud(data);
 end
 end
+
 function defect_option_callback(~, ~, f, ax)
 if isfield(f.UserData, 'originalPcData') && ~isempty(f.UserData.originalPcData)
  highlightedPointCloud = copy(f.UserData.originalPcData); % Make a copy here
@@ -289,11 +296,12 @@ if isfield(f.UserData, 'originalPcData') && ~isempty(f.UserData.originalPcData)
  pcshow(highlightedPointCloud, 'Parent', ax);
 end
 end
+
 function open_cloud_callback(~, ~, f, ax, option)
 switch option
  case '3D File'
  % Allowing multiple file types to be selected
- [file, path] = uigetfile({'*.pcd;*.ply;*.las;*.pts;*.xyz;*.pcd', 'Point Cloud Files'}, 'Open Cloud File');
+ [file, path] = uigetfile({'*.pcd;*.ply;*.las;*.pts;*.xyz;*.pcd', 'Open Cloud File'});
  if isequal(file, 0)
  return;
  end
@@ -313,7 +321,6 @@ switch option
  case '.xyz'
  pcData = dlmread(fullPath);
  pc = pointCloud(pcData(:, 1:3));
- %case '.obj'
  case '.pcd' % Add this case for PCD files
  pc = readPCD(fullPath);
  otherwise
@@ -326,7 +333,7 @@ switch option
  f.UserData.originalPcData = pc; % Store the original data
  end
  case 'Merge Multiple'
- [files, path] = uigetfile({'*.ply; *.las; *.laz; *.pts; *.xyz; *.asc', 'Point Cloud Files'}, 'Merge Point Cloud Files', 'MultiSelect', 'on');
+ [files, path] = uigetfile({'*.ply; *.las; *.laz; *.pts; *.xyz; *.asc', 'Merge Point Cloud Files'}, 'MultiSelect', 'on');
  if isequal(files, 0)
  return;
  end
@@ -371,80 +378,54 @@ switch option
  warning(['File format ', ext, ' is not supported.']);
  return;
  end
- % If the number of points do not match, interpolate color from colorPc to targetPc using nearest neighbors
- if targetPc.Count ~= colorPc.Count
- % Construct a KD-tree for the color point cloud
- Mdl = KDTreeSearcher(colorPc.Location);
- % For every point in targetPc, find the closest point in colorPc
- idx = knnsearch(Mdl, targetPc.Location);
- % Assign colors from the nearest neighbors
- mergedColors = colorPc.Color(idx, :);
- else
- mergedColors = colorPc.Color;
+ % Display the number of points in each file
+ disp(['Number of points in the target file: ', num2str(targetPc.Count)]);
+ disp(['Number of points in the color file: ', num2str(colorPc.Count)]);
+ % Advanced interpolation: Inverse Distance Weighting (IDW)
+ disp('Assigning colors using IDW interpolation...');
+ colorMdl = KDTreeSearcher(colorPc.Location);
+ numNeighbors = 5; % Number of neighbors to use for interpolation
+ [idx, dists] = knnsearch(colorMdl, targetPc.Location, 'K', numNeighbors);
+ % Compute weights for IDW
+ weights = 1 ./ dists;
+ weights = weights ./ sum(weights, 2); % Normalize weights
+ % Convert color data to double for computation
+ colorDataDouble = double(colorPc.Color);
+ % Interpolate colors
+ interpolatedColors = zeros(size(targetPc.Location, 1), 3);
+ for i = 1:3
+ for j = 1:numNeighbors
+ interpolatedColors(:, i) = interpolatedColors(:, i) + weights(:, j) .* colorDataDouble(idx(:, j), i);
  end
- % Create a new point cloud with merged data
- mergedPointCloud = pointCloud(targetPc.Location, 'Color', mergedColors);
- % Display merged point cloud
- pcshow(mergedPointCloud, 'Parent', ax);
- axis(ax, 'equal');
- f.UserData.mergedPc = mergedPointCloud;
- switch ext
- case '.ply'
- % Read the target file for XYZ coordinates
- tempTargetPc = pcread(fullPath);
- targetPcStruct.Location = tempTargetPc.Location;
- targetPcStruct.Color = tempTargetPc.Color;
- % Add other cases if needed
- otherwise
- warning(['File format ', ext, ' is not supported.']);
- return;
  end
- % Read the color file for color information
- fullPath = fullfile(path, colorFile);
- [~, ~, ext] = fileparts(fullPath);
- switch ext
- case '.ply'
- % Read the color file for color information
- tempColorPc = pcread(fullPath);
- colorPcStruct.Location = tempColorPc.Location;
- colorPcStruct.Color = tempColorPc.Color;
- % Add other cases if needed
- otherwise
- warning(['File format ', ext, ' is not supported.']);
- return;
- end
- if isempty(targetPc) || isempty(colorPc)
- return;
- end
- % Assume both point clouds are pre-aligned. If not, you may have to align them first.
- % Convert structs to pointCloud objects
- targetPc = pointCloud(targetPcStruct.Location, 'Color', targetPcStruct.Color);
- colorPc = pointCloud(colorPcStruct.Location, 'Color', colorPcStruct.Color);
- % Merge the two point clouds
- % Merge XYZ and color data
- mergedXYZ = targetPc.Location;
- mergedColor = colorPc.Color;
- % You can also add additional processing here if necessary,
- % like downsampling, aligning, or filtering.
- % Use ICP to fine-tune the alignment
- [tform,~,~] = pcregrigid(colorPc, targetPc, 'Metric','pointToPoint', 'Extrapolate', true);
- % Transform the color point cloud to align with the target point cloud
- colorPcTransformed = pctransform(colorPc, tform);
- % Merge XYZ and color data
- mergedXYZ = [targetPc.Location; colorPcTransformed.Location]; % concatenate the XYZ coordinates
- mergedColor = [targetPc.Color; colorPcTransformed.Color]; % concatenate the color data
- % ----------------------------- NEW LINES END -------------------------------
+ % Ensure no downsampling or filtering occurs
+ disp('Ensuring all original XYZ points are retained...');
+ finalXYZ = targetPc.Location;
+ finalColors = uint8(interpolatedColors);
  % Check if dimensions match
- if size(mergedXYZ, 1) ~= size(mergedColor, 1)
+ if size(finalXYZ, 1) ~= size(finalColors, 1)
  warning('Number of points in XYZ data does not match number of color points.');
  return;
  end
- mergedPointCloud = pointCloud(mergedXYZ, 'Color', mergedColor);
- % Show the merged point cloud and store in UserData
- if ~isempty(mergedPointCloud)
+ % Create a new point cloud with the final data
+ mergedPointCloud = pointCloud(finalXYZ, 'Color', finalColors);
+ % Display merged point cloud
  pcshow(mergedPointCloud, 'Parent', ax);
- f.UserData.pcData = mergedPointCloud;
- f.UserData.originalPcData = mergedPointCloud;
+ axis(ax, 'equal');
+ f.UserData.pcData = mergedPointCloud; % Ensure pcData is set here
+ f.UserData.originalPcData = mergedPointCloud; % Update original data
+ disp(['Merge done. Total points in merged cloud: ', num2str(mergedPointCloud.Count)]);
+ % Confirm presence of points from both clouds
+ uniqueTargetPoints = numel(unique(targetPc.Location, 'rows'));
+ uniqueColorPoints = numel(unique(colorPc.Location, 'rows'));
+ disp(['Unique points from target file: ', num2str(uniqueTargetPoints)]);
+ disp(['Unique points from color file: ', num2str(uniqueColorPoints)]);
+ disp(['Total unique points in merged cloud: ', num2str(numel(unique(mergedPointCloud.Location, 'rows')))]);
+ % Check if all points have colors assigned
+ if all(~isnan(mergedPointCloud.Color), 'all')
+ disp('All points in the merged cloud have colors assigned.');
+ else
+ warning('Some points in the merged cloud do not have colors assigned.');
  end
  brush on;
  axis(ax, 'equal');
@@ -455,6 +436,7 @@ switch option
  warning('Unknown open option');
 end
 end
+
 function save_ply_callback(~, ~, f, ax, saveMode)
 pcData = f.UserData.pcData;
 % Initialize file and path variables
