@@ -1,4 +1,4 @@
-function DetectionGUI()
+function GUI()
 % Create figure
 f = figure('Name', 'Point Cloud Window', 'NumberTitle', 'off');
 ax = axes(f);
@@ -16,18 +16,19 @@ set(ax, 'ButtonDownFcn', @(src, event) axes_ButtonDownFcn(src, event, f));
 
 % Dropdown Menu for Opening Clouds
 openMenu = uimenu(f, 'Label', 'Open');
-newFormats = {'3D File', 'Merge Multiple'};
+newFormats = {'Cloud File', 'Merge Multiple', 'Mesh File'};
 for i = 1:length(newFormats)
     uimenu(openMenu, 'Label', newFormats{i}, 'Callback', @(src, event) open_cloud_callback(src, event, f, ax, newFormats{i}));
 end
+
 % Add Merge Segments as a separate option
 uimenu(openMenu, 'Label', 'Merge Segments', 'Callback', @(src, event) merge_segments_callback(src, event, f, ax));
-
 
 % Dropdown Menu for Saving Options
 saveMenu = uimenu(f, 'Label', 'Save Cloud As');
 f.UserData.saveAllMenu = uimenu(saveMenu, 'Label', 'Save All Points', 'Enable', 'on', 'Callback', @(src, event) save_ply_callback(src, event, f, ax, 'all'));
 f.UserData.saveBrushedMenu = uimenu(saveMenu, 'Label', 'Save Brushed Points', 'Enable', 'on', 'Callback', @(src, event) save_ply_callback(src, event, f, ax, 'brushed'));
+
 % Dropdown Menu for Additional Visualization Options
 vizOptionsMenu = uimenu(f, 'Label', 'Visualization');
 gridOption = uimenu(vizOptionsMenu, 'Label', 'Grid', 'Callback', @(src, event) grid_option_callback(src, event, ax));
@@ -403,43 +404,101 @@ if isfield(f.UserData, 'originalPcData') && ~isempty(f.UserData.originalPcData)
 end
 end
 
-        function open_cloud_callback(~, ~, f, ax, option)
-            switch option
-                case '3D File'
-                    % Allowing multiple file types to be selected
-                    [file, path] = uigetfile({'*.pcd;*.ply;*.las;*.pts;*.xyz;*.pcd', 'Open Cloud File'});
-                    if isequal(file, 0)
-                        return;
-                    end
-                    fullPath = fullfile(path, file);
-                    % Determine the file extension to read the correct point cloud format
-                    [~, ~, ext] = fileparts(fullPath);
-                    pc = [];
-                    switch ext
-                        case '.ply'
-                            pc = pcread(fullPath);
-                        case '.las'
-                            lasReader = lasFileReader(fullPath);
-                            lasData = read(lasReader);
-                            pc = pointCloud(lasData); % Assuming lasData is appropriately formatted
-                        case '.pts'
-                            % Your logic for reading .pts goes here
-                        case '.xyz'
-                            pcData = dlmread(fullPath);
-                            pc = pointCloud(pcData(:, 1:3));
-                        case '.pcd' % Add this case for PCD files
-                            pc = readPCD(fullPath);
-                        otherwise
-                            warning(['File format ', ext, ' is not supported.']);
-                            return;
-                    end
-                    if ~isempty(pc)
-                        pcshow(pc, 'Parent', ax);
-                        f.UserData.pcData = pc;
-                        f.UserData.originalPcData = pc; % Store the original data
-                    end
+function open_cloud_callback(~, ~, f, ax, option)
+    switch option
+        case 'Cloud File'
+            % Allow multiple file types to be selected
+            [file, path] = uigetfile({'*.pcd;*.ply;*.las;*.pts;*.xyz;*.pcd', 'Open Cloud File'});
+            if isequal(file, 0)
+                return;
+            end
+            fullPath = fullfile(path, file);
+            % Determine the file extension to read the correct point cloud format
+            [~, ~, ext] = fileparts(fullPath);
+            pc = [];
+            switch ext
+                case '.ply'
+                    pc = pcread(fullPath);
+                case '.las'
+                    lasReader = lasFileReader(fullPath);
+                    lasData = read(lasReader);
+                    pc = pointCloud(lasData); % Assuming lasData is appropriately formatted
+                case '.pts'
+                    % Your logic for reading .pts goes here
+                case '.xyz'
+                    pcData = dlmread(fullPath);
+                    pc = pointCloud(pcData(:, 1:3));
+                case '.pcd' % Add this case for PCD files
+                    pc = readPCD(fullPath);
+                otherwise
+                    warning(['File format ', ext, ' is not supported.']);
+                    return;
+            end
+          if ~isempty(pc)
+    pcshow(pc, 'Parent', ax);
+    f.UserData.pcData = pc;
+    f.UserData.originalPcData = pc; % Store the original data
 
-                case 'Merge Multiple'
+    % Calculate the bounding box dimensions
+    pcLocation = pc.Location;
+    xMin = min(pcLocation(:, 1));
+    xMax = max(pcLocation(:, 1));
+    yMin = min(pcLocation(:, 2));
+    yMax = max(pcLocation(:, 2));
+    zMin = min(pcLocation(:, 3));
+    zMax = max(pcLocation(:, 3));
+    
+    % Compute length and width in units of the point cloud
+    length = xMax - xMin;
+    width = yMax - yMin;
+    
+    % Display raw dimensions
+    disp(['Raw Length: ', num2str(length), ' units']);
+    disp(['Raw Width: ', num2str(width), ' units']);
+    
+    % Assuming the data might be in millimeters if the dimensions seem too large
+    if length > .1 || width > .1
+        % Assume data might be in millimeters
+        lengthMeters = length / 1000;
+        widthMeters = width / 1000;
+    else
+        % Assume data is already in meters
+        lengthMeters = length;
+        widthMeters = width;
+    end
+    
+    % Convert from meters to inches and feet
+    lengthInches = lengthMeters * 39.3701;
+    widthInches = widthMeters * 39.3701;
+    lengthFeet = lengthMeters * 3.28084;
+    widthFeet = widthMeters * 3.28084;
+    
+    % Display the dimensions
+    disp(['Length: ', num2str(lengthInches), ' inches (', num2str(lengthFeet), ' feet)']);
+    disp(['Width: ', num2str(widthInches), ' inches (', num2str(widthFeet), ' feet)']);
+    disp(['Margin of Error (±2%): Length: ', num2str(lengthInches * 0.02), ' inches, Width: ', num2str(widthInches * 0.02), ' inches']);
+    
+    % Compute raw GOM dimensions assuming a scale factor of 1/100 (i.e., two decimal places)
+    rawGOMLength = length / 100;
+    rawGOMWidth = width / 100;
+    
+    % Convert raw GOM dimensions to meters, inches, and feet
+    rawGOMLengthMeters = rawGOMLength / 1000;
+    rawGOMWidthMeters = rawGOMWidth / 1000;
+    rawGOMLengthInches = rawGOMLengthMeters * 39.3701;
+    rawGOMWidthInches = rawGOMWidthMeters * 39.3701;
+    rawGOMLengthFeet = rawGOMLengthMeters * 3.28084;
+    rawGOMWidthFeet = rawGOMWidthMeters * 3.28084;
+    
+    % Display the raw GOM dimensions
+    disp(['Raw GOM Length: ', num2str(rawGOMLengthInches), ' inches (', num2str(rawGOMLengthFeet), ' feet)']);
+    disp(['Raw GOM Width: ', num2str(rawGOMWidthInches), ' inches (', num2str(rawGOMWidthFeet), ' feet)']);
+    disp(['Raw GOM Margin of Error (±2%): Length: ', num2str(rawGOMLengthInches * 0.02), ' inches, Width: ', num2str(rawGOMWidthInches * 0.02), ' inches']);
+end
+
+        case 'Merge Multiple'
+            tic; % Start timing
+            
             [files, path] = uigetfile({'*.ply; *.las; *.laz; *.pts; *.xyz; *.asc', 'Merge Point Cloud Files'}, 'MultiSelect', 'on');
             if isequal(files, 0)
                 return;
@@ -561,10 +620,133 @@ end
             title(ax, 'Merged Point Cloud');
             f.UserData.saveAllMenu.Enable = 'on';
             f.UserData.saveBrushedMenu.Enable = 'on';
+            
+            elapsedTime = toc; % End timing
+            disp(['Elapsed time: ', num2str(elapsedTime), ' seconds']);
+
+         case 'Mesh File'
+            % Prompt user to select a mesh file
+            [file, path] = uigetfile({'*.off;*.obj;*.stl;*.dae', 'Open Mesh File'});
+            if isequal(file, 0)
+                return;
+            end
+            fullPath = fullfile(path, file);
+
+            % Determine the file extension
+            [~, ~, ext] = fileparts(fullPath);
+
+            % Read the mesh file based on its format
+            try
+                switch ext
+                    case '.off'
+                        [vertices, faces] = read_off(fullPath);
+                    case '.obj'
+                        [vertices, faces] = read_obj(fullPath);
+                    case '.stl'
+                        [vertices, faces] = read_stl(fullPath);
+                    case '.dae'
+                        [vertices, faces] = read_dae(fullPath);
+                    otherwise
+                        error('Unsupported mesh file format.');
+                end
+                
+                % Ensure the vertices are in the expected M-by-3 format
+                disp(['Vertices size: ', num2str(size(vertices))]); % Debugging
+                if size(vertices, 2) ~= 3
+                    error('Vertices must be in M-by-3 format.');
+                end
+                
+                % Create a point cloud from vertices
+                pc = pointCloud(vertices);
+
+                % Display the point cloud in the existing window
+                cla(ax); % Clear the existing axes
+                pcshow(pc, 'Parent', ax);
+                axis(ax, 'equal');
+                f.UserData.pcData = pc; % Store the point cloud
+                f.UserData.originalPcData = pc; % Update the original data
+                title(ax, 'Mesh Point Cloud');
+
+                % Display a message indicating success
+                disp('Mesh file successfully loaded and displayed.');
+            catch ME
+                warning(['Failed to read mesh file: ', ME.message]);
+            end
         otherwise
             warning('Unknown open option');
     end
 end
+
+% Helper functions to read mesh file formats
+function [vertices, faces] = read_off(filename)
+    fid = fopen(filename, 'r');
+    if fid == -1
+        error('Cannot open the file.');
+    end
+
+    header = fgetl(fid);
+    if ~strcmp(header, 'OFF')
+        error('Not a valid OFF file.');
+    end
+
+    counts = fscanf(fid, '%d %d %d', 3);
+    numVertices = counts(1);
+    numFaces = counts(2);
+
+    vertices = fscanf(fid, '%f %f %f', [3, numVertices])';
+    faces = fscanf(fid, '%d %d %d %d', [4, numFaces]);
+    faces = faces(2:4, :)' + 1;
+
+    fclose(fid);
+end
+
+function [vertices, faces] = read_obj(filename)
+    % Read vertices and faces from .obj file
+    fid = fopen(filename, 'r');
+    vertices = [];
+    faces = [];
+    while ~feof(fid)
+        line = fgetl(fid);
+        if startsWith(line, 'v ')
+            vertices = [vertices; sscanf(line(3:end), '%f %f %f')'];
+        elseif startsWith(line, 'f ')
+            faces = [faces; sscanf(line(3:end), '%d %d %d')'];
+        end
+    end
+    fclose(fid);
+end
+
+function [vertices, faces] = read_stl(filename)
+    % Read vertices and faces from .stl file
+    [stl_data, stl_faces, stl_normals] = stlread(filename); % Use MATLAB's built-in stlread function
+    vertices = stl_data.Points;
+    faces = stl_data.ConnectivityList;
+end
+
+function [vertices, faces] = read_dae(filename)
+    % Read vertices and faces from .dae file using xmlread and custom parsing
+    doc = xmlread(filename);
+    vertices = parse_vertices(doc);
+    faces = parse_faces(doc);
+end
+
+% Custom parsing functions for .dae files
+function vertices = parse_vertices(doc)
+    % Extract vertices from .dae file
+    verticesNode = doc.getElementsByTagName('float_array').item(0);
+    verticesText = char(verticesNode.getFirstChild.getData);
+    vertices = sscanf(verticesText, '%f');
+    vertices = reshape(vertices, 3, [])';
+end
+
+function faces = parse_faces(doc)
+    % Extract faces from .dae file
+    facesNode = doc.getElementsByTagName('p').item(0);
+    facesText = char(facesNode.getFirstChild.getData);
+    faces = sscanf(facesText, '%d');
+    faces = reshape(faces, 3, [])' + 1; % Assuming faces are triangles
+end
+
 
 function [normalizedTarget, normalizedColor, targetMin, targetRange] = normalize_coordinates(target, color)
     % Determine the ranges of the coordinates
@@ -602,6 +784,10 @@ function interpolatedColors = idw_interpolation(colorLocations, colorValues, tar
         interpolatedColors(i, :) = sum(colorValues .* weights, 1);
     end
 end
+ 
+
+
+
 
     function merge_segments_callback(~, ~, f, ax)
         % Initialize arrays to store merged data
