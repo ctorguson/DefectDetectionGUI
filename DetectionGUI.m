@@ -448,6 +448,20 @@ function open_cloud_callback(~, ~, f, ax, option)
     zMin = min(pcLocation(:, 3));
     zMax = max(pcLocation(:, 3));
     
+if ~isempty(pc)
+    pcshow(pc, 'Parent', ax);
+    f.UserData.pcData = pc;
+    f.UserData.originalPcData = pc; % Store the original data
+
+    % Calculate the bounding box dimensions
+    pcLocation = pc.Location;
+    xMin = min(pcLocation(:, 1));
+    xMax = max(pcLocation(:, 1));
+    yMin = min(pcLocation(:, 2));
+    yMax = max(pcLocation(:, 2));
+    zMin = min(pcLocation(:, 3));
+    zMax = max(pcLocation(:, 3));
+    
     % Compute length and width in units of the point cloud
     length = xMax - xMin;
     width = yMax - yMin;
@@ -467,15 +481,30 @@ function open_cloud_callback(~, ~, f, ax, option)
         widthMeters = width;
     end
     
+    % Conditional scaling factor adjustment for Polycam files
+    if length > 0.3 || width > 0.3
+        % Adjust for larger Polycam clouds (dimensions in feet)
+        scalingFactor = 1000; % Adjust this factor as needed
+    else
+        % Adjust for smaller Polycam clouds (dimensions in inches)
+        scalingFactor = 1; 
+    end
+    
+    % Adjusted length and width
+    lengthMetersAdjusted = lengthMeters * scalingFactor;
+    widthMetersAdjusted = widthMeters * scalingFactor;
+    
     % Convert from meters to inches and feet
-    lengthInches = lengthMeters * 39.3701;
-    widthInches = widthMeters * 39.3701;
-    lengthFeet = lengthMeters * 3.28084;
-    widthFeet = widthMeters * 3.28084;
+    lengthInches = lengthMetersAdjusted * 39.3701;
+    widthInches = widthMetersAdjusted * 39.3701;
+    lengthFeet = lengthMetersAdjusted * 3.28084;
+    widthFeet = widthMetersAdjusted * 3.28084;
     
     % Display the dimensions
     disp(['Length (If Polycam File): ', num2str(lengthInches), ' inches (', num2str(lengthFeet), ' feet)']);
     disp(['Width (If Polycam File): ', num2str(widthInches), ' inches (', num2str(widthFeet), ' feet)']);
+    disp(['Length (If Polycam File): ', num2str(lengthMetersAdjusted * 1000), ' millimeters']);
+    disp(['Width (If Polycam File): ', num2str(widthMetersAdjusted * 1000), ' millimeters']);
     disp(['Margin of Error (±2%): Length: ', num2str(lengthInches * 0.02), ' inches, Width: ', num2str(widthInches * 0.02), ' inches']);
     
     % Compute raw GOM dimensions assuming a scale factor of 1/100 (i.e., two decimal places)
@@ -493,8 +522,12 @@ function open_cloud_callback(~, ~, f, ax, option)
     % Display the raw GOM dimensions
     disp(['Length (If GOM File): ', num2str(rawGOMLengthInches), ' inches (', num2str(rawGOMLengthFeet), ' feet)']);
     disp(['Width (If GOM File): ', num2str(rawGOMWidthInches), ' inches (', num2str(rawGOMWidthFeet), ' feet)']);
+    disp(['Length (If GOM File): ', num2str(rawGOMLength * 10), ' millimeters']);
+    disp(['Width (If GOM File): ', num2str(rawGOMWidth * 10), ' millimeters']);
     disp(['Raw GOM Margin of Error (±2%): Length: ', num2str(rawGOMLengthInches * 0.02), ' inches, Width: ', num2str(rawGOMWidthInches * 0.02), ' inches']);
 end
+          end
+    
 
         case 'Merge Multiple'
             tic; % Start timing
