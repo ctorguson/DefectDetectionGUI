@@ -474,8 +474,8 @@ function open_cloud_callback(~, ~, f, ax, option)
     widthFeet = widthMeters * 3.28084;
     
     % Display the dimensions
-    disp(['Length: ', num2str(lengthInches), ' inches (', num2str(lengthFeet), ' feet)']);
-    disp(['Width: ', num2str(widthInches), ' inches (', num2str(widthFeet), ' feet)']);
+    disp(['Length (If Polycam File): ', num2str(lengthInches), ' inches (', num2str(lengthFeet), ' feet)']);
+    disp(['Width (If Polycam File): ', num2str(widthInches), ' inches (', num2str(widthFeet), ' feet)']);
     disp(['Margin of Error (±2%): Length: ', num2str(lengthInches * 0.02), ' inches, Width: ', num2str(widthInches * 0.02), ' inches']);
     
     % Compute raw GOM dimensions assuming a scale factor of 1/100 (i.e., two decimal places)
@@ -491,8 +491,8 @@ function open_cloud_callback(~, ~, f, ax, option)
     rawGOMWidthFeet = rawGOMWidthMeters * 3.28084;
     
     % Display the raw GOM dimensions
-    disp(['Raw GOM Length: ', num2str(rawGOMLengthInches), ' inches (', num2str(rawGOMLengthFeet), ' feet)']);
-    disp(['Raw GOM Width: ', num2str(rawGOMWidthInches), ' inches (', num2str(rawGOMWidthFeet), ' feet)']);
+    disp(['Length (If GOM File): ', num2str(rawGOMLengthInches), ' inches (', num2str(rawGOMLengthFeet), ' feet)']);
+    disp(['Width (If GOM File): ', num2str(rawGOMWidthInches), ' inches (', num2str(rawGOMWidthFeet), ' feet)']);
     disp(['Raw GOM Margin of Error (±2%): Length: ', num2str(rawGOMLengthInches * 0.02), ' inches, Width: ', num2str(rawGOMWidthInches * 0.02), ' inches']);
 end
 
