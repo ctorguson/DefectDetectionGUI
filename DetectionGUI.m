@@ -466,9 +466,8 @@ if ~isempty(pc)
     length = xMax - xMin;
     width = yMax - yMin;
     
-    % Display raw dimensions
-    disp(['Raw Length: ', num2str(length), ' units']);
-    disp(['Raw Width: ', num2str(width), ' units']);
+    % Display raw dimensions in a single line
+    disp(['Raw HxW: ', num2str(length), 'x', num2str(width), ' units']);
     
     % Assuming the data might be in millimeters if the dimensions seem too large
     if length > .1 || width > .1
@@ -481,53 +480,19 @@ if ~isempty(pc)
         widthMeters = width;
     end
     
-    % Conditional scaling factor adjustment for Polycam files
-    if length > 0.3 || width > 0.3
-        % Adjust for larger Polycam clouds (dimensions in feet)
-        scalingFactor = 1000; % Adjust this factor as needed
-    else
-        % Adjust for smaller Polycam clouds (dimensions in inches)
-        scalingFactor = 1; 
-    end
+    % Convert from meters to inches
+    lengthInches = lengthMeters * 39.3701;
+    widthInches = widthMeters * 39.3701;
     
-    % Adjusted length and width
-    lengthMetersAdjusted = lengthMeters * scalingFactor;
-    widthMetersAdjusted = widthMeters * scalingFactor;
+    % Calculate margin of error
+    lengthError = lengthInches * 0.02;
+    widthError = widthInches * 0.02;
     
-    % Convert from meters to inches and feet
-    lengthInches = lengthMetersAdjusted * 39.3701;
-    widthInches = widthMetersAdjusted * 39.3701;
-    lengthFeet = lengthMetersAdjusted * 3.28084;
-    widthFeet = widthMetersAdjusted * 3.28084;
-    
-    % Display the dimensions
-    disp(['Length (If Polycam File): ', num2str(lengthInches), ' inches (', num2str(lengthFeet), ' feet)']);
-    disp(['Width (If Polycam File): ', num2str(widthInches), ' inches (', num2str(widthFeet), ' feet)']);
-    disp(['Length (If Polycam File): ', num2str(lengthMetersAdjusted * 1000), ' millimeters']);
-    disp(['Width (If Polycam File): ', num2str(widthMetersAdjusted * 1000), ' millimeters']);
-    disp(['Margin of Error (±2%): Length: ', num2str(lengthInches * 0.02), ' inches, Width: ', num2str(widthInches * 0.02), ' inches']);
-    
-    % Compute raw GOM dimensions assuming a scale factor of 1/100 (i.e., two decimal places)
-    rawGOMLength = length / 100;
-    rawGOMWidth = width / 100;
-    
-    % Convert raw GOM dimensions to meters, inches, and feet
-    rawGOMLengthMeters = rawGOMLength / 1000;
-    rawGOMWidthMeters = rawGOMWidth / 1000;
-    rawGOMLengthInches = rawGOMLengthMeters * 39.3701;
-    rawGOMWidthInches = rawGOMWidthMeters * 39.3701;
-    rawGOMLengthFeet = rawGOMLengthMeters * 3.28084;
-    rawGOMWidthFeet = rawGOMWidthMeters * 3.28084;
-    
-    % Display the raw GOM dimensions
-    disp(['Length (If GOM File): ', num2str(rawGOMLengthInches), ' inches (', num2str(rawGOMLengthFeet), ' feet)']);
-    disp(['Width (If GOM File): ', num2str(rawGOMWidthInches), ' inches (', num2str(rawGOMWidthFeet), ' feet)']);
-    disp(['Length (If GOM File): ', num2str(rawGOMLength * 10), ' millimeters']);
-    disp(['Width (If GOM File): ', num2str(rawGOMWidth * 10), ' millimeters']);
-    disp(['Raw GOM Margin of Error (±2%): Length: ', num2str(rawGOMLengthInches * 0.02), ' inches, Width: ', num2str(rawGOMWidthInches * 0.02), ' inches']);
+    % Display the dimensions and margin of error in a single line
+    disp(['WxL: ', num2str(widthInches), 'x', num2str(lengthInches), ' inches ± ', num2str(widthError), 'x', num2str(lengthError), ' inches']);
 end
           end
-    
+          
 
         case 'Merge Multiple'
             tic; % Start timing
