@@ -1,3 +1,4 @@
 # MatlabEnvironmentForGUI
-arch -x86_64 /Applications/MATLAB_R2023b.app/bin/matlab &
+arch -x86_64 
+MATLAB_R2023b.app
 Currently consumes .PLY files 
