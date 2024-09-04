@@ -167,8 +167,6 @@ else
 end
 end
 
-
-
 function mesh_option_callback(~, ~, f, ax)
 % Check if point cloud data exists
 if isfield(f.UserData, 'pcData') && ~isempty(f.UserData.pcData)
