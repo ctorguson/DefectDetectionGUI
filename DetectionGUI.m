@@ -43,105 +43,131 @@ alignXYOption = uimenu(vizOptionsMenu, 'Label', 'Align XY', 'Callback', @(src, e
 end
 
 function flatten_parabolic_callback(~, ~, f, ax)
+% Ensure that point cloud data is available in the GUI's UserData
 if isfield(f.UserData, 'pcData') && ~isempty(f.UserData.pcData)
-    pcData = f.UserData.pcData.Location;
-    colorData = f.UserData.pcData.Color; % Extract color data
+    % Access point cloud data from UserData
+    ptCloud = f.UserData.pcData;
 
-    % Check if intensity data is available
-    if isfield(f.UserData.pcData, 'Intensity')
-        intensityData = f.UserData.pcData.Intensity;
-    else
-        intensityData = [];
-    end
+    % Downsample to ~5000-5500 points
+    gridStep = 0.005;
+    pcDownsize = pcdownsample(ptCloud, 'gridAverage', gridStep);
 
-    % Normalize the data for better numerical stability
-    pcDataMean = mean(pcData, 1);
-    pcDataStd = std(pcData, 0, 1);
-    normPcData = (pcData - pcDataMean) ./ pcDataStd;
+    % Grab downsized x, y, z coordinates into arrays
+    X_down = cast(pcDownsize.Location(:,1), "double");
+    Y_down = cast(pcDownsize.Location(:,2), "double");
+    Z_down = cast(pcDownsize.Location(:,3), "double");
 
-    % Fit a parabolic surface of the form z = ax^2 + by^2 + c to the point cloud data
-    X = [normPcData(:,1).^2, normPcData(:,2).^2, ones(size(normPcData,1),1)];
-    [abc, R] = lscov(X, normPcData(:,3)); % Weighted least squares solution
+    % Fit a 3rd order polynomial to the downsized point cloud data
+    polyFit = fit([X_down, Y_down], Z_down, 'poly33');
+    p00 = polyFit.p00;
+    p10 = polyFit.p10;
+    p01 = polyFit.p01;
+    p20 = polyFit.p20;
+    p11 = polyFit.p11;
+    p02 = polyFit.p02;
+    p30 = polyFit.p30;
+    p21 = polyFit.p21;
+    p12 = polyFit.p12;
+    p03 = polyFit.p03;
 
-    % Check if the matrix is rank deficient
-    if rank(R) < size(R, 2)
-        warning('Rank deficient, the fit may not be accurate.');
-    end
+    % Calculate the modifier array based on the polynomial fit
+    modifier_array = p00 + p10 .* X_down + p01 .* Y_down + p20 .* (X_down.^2) ...
+        + p11 .* X_down .* Y_down + p02 .* (Y_down.^2) + p30 .* (X_down.^3) ...
+        + p21 .* (X_down.^2) .* Y_down + p12 .* X_down .* (Y_down.^2) + p03 .* (Y_down.^3);
 
-    % Compute the z-values of the fitted parabolic surface
-    fittedZ = abc(1)*normPcData(:,1).^2 + abc(2)*normPcData(:,2).^2 + abc(3);
+    % Update the Z values
+    Z_new = Z_down - modifier_array;
 
-    % Subtract the fitted parabolic surface from the original z-values to flatten the primary curvature
-    flattenedZ = normPcData(:,3) - fittedZ;
+    % Create a new point cloud with flattened Z values
+    pcMatrix = [X_down, Y_down, Z_new];
+    pcFiltered = pointCloud(pcMatrix); % Generate filtered point cloud
 
-    % Denormalize the flattened Z values
-    denormFlattenedZ = flattenedZ * pcDataStd(3) + pcDataMean(3);
+    % Remove outliers using 3-sigma rule
+    pcStats = datastats(Z_new);
+    stDev = pcStats.std;
+    meanVal = pcStats.mean;
+    lower_bound = meanVal - (3 * stDev);
+    upper_bound = meanVal + (3 * stDev);
 
-    % Create the new point cloud data with the flattened z-values
-    flattenedPoints = [pcData(:,1:2), denormFlattenedZ];
+    X_intermediate = X_down;
+    Y_intermediate = Y_down;
+    Z_intermediate = Z_new;
 
-    % Create a new point cloud
-    if isempty(intensityData)
-        flattenedPC = pointCloud(flattenedPoints, 'Color', colorData);
-    else
-        flattenedPC = pointCloud(flattenedPoints, 'Color', colorData, 'Intensity', intensityData);
-    end
+    X_intermediate(Z_new < lower_bound | Z_new > upper_bound) = [];
+    Y_intermediate(Z_new < lower_bound | Z_new > upper_bound) = [];
+    Z_intermediate(Z_new < lower_bound | Z_new > upper_bound) = [];
 
-    % Visualize the new, flattened point cloud
-    pcshow(flattenedPC, 'Parent', ax);
-    hold on;
-    axis(ax, 'equal');
-    hold off;
+    % Create a point cloud with no outliers
+    pcMatrix2 = [X_intermediate, Y_intermediate, Z_intermediate];
+    pcNoOutliers = pointCloud(pcMatrix2);
 
-    % Store the flattened point cloud in the UserData
-    f.UserData.pcData = flattenedPC;
+    % Display the point cloud without outliers
+    pcshow(pcNoOutliers, 'Parent', ax);
+    title(ax, 'Filtered Point Cloud (No Outliers)');
+
+    % Perform a second polynomial fit without outliers
+    polyFit2 = fit([X_intermediate, Y_intermediate], Z_intermediate, 'poly33');
+    p00_final = polyFit2.p00;
+    p10_final = polyFit2.p10;
+    p01_final = polyFit2.p01;
+    p20_final = polyFit2.p20;
+    p11_final = polyFit2.p11;
+    p02_final = polyFit2.p02;
+    p30_final = polyFit2.p30;
+    p21_final = polyFit2.p21;
+    p12_final = polyFit2.p12;
+    p03_final = polyFit2.p03;
+
+    % Grab original x, y, z, and color values
+    X_original = cast(ptCloud.Location(:,1), "double");
+    Y_original = cast(ptCloud.Location(:,2), "double");
+    Z_original = cast(ptCloud.Location(:,3), "double");
+    R_original = cast(ptCloud.Color(:,1), "uint8");
+    G_original = cast(ptCloud.Color(:,2), "uint8");
+    B_original = cast(ptCloud.Color(:,3), "uint8");
+
+    % Apply the second polynomial fit to the original data
+    num2 = length(X_original);
+
+    p00_array2 = p00_final * ones(num2, 1);
+    p10_array2 = p10_final .* X_original;
+    p01_array2 = p01_final .* Y_original;
+    p20_array2 = p20_final .* (X_original.^2);
+    p11_array2 = p11_final .* X_original .* Y_original;
+    p02_array2 = p02_final .* (Y_original.^2);
+    p30_array2 = p30_final .* (X_original.^3);
+    p21_array2 = p21_final .* (X_original.^2) .* Y_original;
+    p12_array2 = p12_final .* X_original .* (Y_original.^2);
+    p03_array2 = p03_final .* (Y_original.^3);
+
+    modifier_array2 = p00_array2 + p10_array2 + p01_array2 + p20_array2 + p11_array2 ...
+        + p02_array2 + p30_array2 + p21_array2 + p12_array2 + p03_array2;
+
+    % Final Z values after second polynomial fit
+    Z_final = Z_original - modifier_array2;
+
+    % Generate the final flattened point cloud
+    xyz = [X_original, Y_original, Z_final];
+    rgb = [R_original, G_original, B_original];
+    pcFinal = pointCloud(xyz, 'Color', rgb);
+
+    % Display the final point cloud
+    pcshow(pcFinal, 'Parent', ax);
+    title(ax, 'Final Flattened Point Cloud');
+
+    % Optionally save the final point cloud (if needed, otherwise remove)
+    % pcwrite(pcFinal, 'final_flattened_data.ply');
+
+    % Store the final processed point cloud in UserData for future use
+    f.UserData.pcFinal = pcFinal;
+
 else
-    errordlg('No point cloud data available for fitting a plane!', 'Error');
+    % Error handling if point cloud is not available
+    errordlg('No point cloud data available to flatten!', 'Error');
 end
 end
 
-function align_xy_callback(~, ~, f, ax)
-if isfield(f.UserData, 'pcData') && ~isempty(f.UserData.pcData)
-    pcData = f.UserData.pcData.Location;
-    colorData = f.UserData.pcData.Color; % Extract color data
 
-    % Check if intensity data is available
-    if isfield(f.UserData.pcData, 'Intensity')
-        intensityData = f.UserData.pcData.Intensity;
-    else
-        intensityData = [];
-    end
-
-    % Perform PCA on the point cloud data
-    [coeff, score, ~] = pca(pcData);
-
-    % The principal components are the columns of 'coeff'
-    % Align the first principal component with the x-axis and the second with the y-axis
-    alignedData = score(:, 1:3) * coeff(:, 1:3)';
-
-    % Center the aligned data around the origin
-    alignedData = bsxfun(@minus, alignedData, mean(alignedData));
-
-    % Create a new point cloud with the aligned data
-    if isempty(intensityData)
-        alignedPC = pointCloud(alignedData, 'Color', colorData);
-    else
-        alignedPC = pointCloud(alignedData, 'Color', colorData, 'Intensity', intensityData);
-    end
-
-    % Visualize the aligned point cloud
-    pcshow(alignedPC, 'Parent', ax);
-    hold on;
-    axis(ax, 'equal');
-    view(ax, [0, 90]); % Set the view to be directly above the XY plane
-    hold off;
-
-    % Store the aligned point cloud in the UserData
-    f.UserData.pcData = alignedPC;
-else
-    errordlg('No point cloud data available for alignment!', 'Error');
-end
-end
 
 function mesh_option_callback(~, ~, f, ax)
 % Check if point cloud data exists
@@ -405,516 +431,482 @@ end
 end
 
 function open_cloud_callback(~, ~, f, ax, option)
-    switch option
-        case 'Cloud File'
-            % Allow multiple file types to be selected
-            [file, path] = uigetfile({'*.pcd;*.ply;*.las;*.pts;*.xyz;*.pcd', 'Open Cloud File'});
-            if isequal(file, 0)
+switch option
+    case 'Cloud File'
+        % Allow multiple file types to be selected
+        [file, path] = uigetfile({'*.pcd;*.ply;*.las;*.pts;*.xyz;*.pcd', 'Open Cloud File'});
+        if isequal(file, 0)
+            return;
+        end
+        fullPath = fullfile(path, file);
+        % Determine the file extension to read the correct point cloud format
+        [~, ~, ext] = fileparts(fullPath);
+        pc = [];
+        switch ext
+            case '.ply'
+                pc = pcread(fullPath);
+            case '.las'
+                lasReader = lasFileReader(fullPath);
+                lasData = read(lasReader);
+                pc = pointCloud(lasData); % Assuming lasData is appropriately formatted
+            case '.pts'
+                % Your logic for reading .pts goes here
+            case '.xyz'
+                pcData = dlmread(fullPath);
+                pc = pointCloud(pcData(:, 1:3));
+            case '.pcd' % Add this case for PCD files
+                pc = readPCD(fullPath);
+            otherwise
+                warning(['File format ', ext, ' is not supported.']);
                 return;
-            end
-            fullPath = fullfile(path, file);
-            % Determine the file extension to read the correct point cloud format
-            [~, ~, ext] = fileparts(fullPath);
-            pc = [];
+        end
+
+        if ~isempty(pc)
+            pcshow(pc, 'Parent', ax);
+            f.UserData.pcData = pc;
+            f.UserData.originalPcData = pc; % Store the original data
+
+            % Calculate the bounding box dimensions
+            pcLocation = pc.Location;
+            xMin = min(pcLocation(:, 1));
+            xMax = max(pcLocation(:, 1));
+            yMin = min(pcLocation(:, 2));
+            yMax = max(pcLocation(:, 2));
+            zMin = min(pcLocation(:, 3));
+            zMax = max(pcLocation(:, 3));
+
+            % Compute length, width, and height in inches
+            length = xMax - xMin;
+            width = yMax - yMin;
+            height = zMax - zMin;
+
+            % Convert dimensions directly to inches (assuming input is already in inches)
+            lengthInches = length;
+            widthInches = width;
+            heightInches = height;
+
+            % Display the dimensions in separate lines with proper unit names
+            disp(['Length: ', num2str(lengthInches), ' inches']);
+            disp(['Width: ', num2str(widthInches), ' inches']);
+            disp(['Height: ', num2str(heightInches), ' inches']);
+        end
+
+    case 'Merge Multiple'
+
+        [files, path] = uigetfile({'*.ply; *.las; *.laz; *.pts; *.xyz; *.asc', 'Merge Point Cloud Files'}, 'MultiSelect', 'on');
+        if isequal(files, 0)
+            return;
+        end
+
+        % Choose which file is for XYZ and which is for Color
+        [indx, tf] = listdlg('ListString', files, 'SelectionMode', 'single', 'PromptString', 'Select a file for XYZ coordinates:');
+        if tf == 0
+            return;
+        end
+        targetFile = files{indx};
+        files(indx) = []; % Remove the selected file from the list
+        [indx, tf] = listdlg('ListString', files, 'SelectionMode', 'single', 'PromptString', 'Select a file for Color:');
+        if tf == 0
+            return;
+        end
+        colorFile = files{indx};
+
+        % Read the target file for XYZ coordinates
+        fullPath = fullfile(path, targetFile);
+        [~, ~, ext] = fileparts(fullPath);
+        switch ext
+            case '.ply'
+                targetPc = pcread(fullPath);
+            case '.xyz'
+                pcData = dlmread(fullPath);
+                targetPc = pointCloud(pcData(:, 1:3));
+            otherwise
+                warning(['File format ', ext, ' is not supported.']);
+                return;
+        end
+
+        % Read the color file for color information
+        fullPath = fullfile(path, colorFile);
+        [~, ~, ext] = fileparts(fullPath);
+        switch ext
+            case '.ply'
+                colorPc = pcread(fullPath);
+            case '.xyz'
+                colorData = dlmread(fullPath);
+                colorPc = pointCloud(zeros(size(colorData, 1), 3), 'Color', colorData);
+            otherwise
+                warning(['File format ', ext, ' is not supported.']);
+                return;
+        end
+
+        % Align the color point cloud to the XYZ point cloud
+        disp('Starting alignment...');
+        [tform, ~, rmse] = pcregrigid(colorPc, targetPc, 'Metric', 'pointToPoint', 'Extrapolate', true);
+        disp(['Alignment done. RMSE: ', num2str(rmse)]);
+
+        % Apply transformation to the color point cloud
+        colorPcTransformed = pctransform(colorPc, tform);
+        disp('Color point cloud transformed.');
+
+        % Extract locations and colors
+        targetLocations = double(targetPc.Location);
+        colorLocations = double(colorPcTransformed.Location);
+        colorValues = double(colorPcTransformed.Color);
+
+        % Visualize aligned point clouds before merging
+        figure;
+        subplot(1, 2, 1);
+        pcshow(targetPc);
+        title('Target Point Cloud');
+        subplot(1, 2, 2);
+        pcshow(colorPcTransformed);
+        title('Transformed Color Point Cloud');
+
+        % Normalize the coordinates
+        [normalizedTarget, normalizedColor, targetMin, targetRange] = normalize_coordinates(targetLocations, colorLocations);
+
+        % Debugging: Check normalization values before and after
+        disp('Target Locations - Before Normalization');
+        disp([min(targetLocations); max(targetLocations)]);
+        disp('Color Locations - Before Normalization');
+        disp([min(colorLocations); max(colorLocations)]);
+        disp('Target Locations - After Normalization');
+        disp([min(normalizedTarget); max(normalizedTarget)]);
+        disp('Color Locations - After Normalization');
+        disp([min(normalizedColor); max(normalizedColor)]);
+
+        % Perform IDW interpolation
+        disp('Performing IDW interpolation...');
+        interpolatedColors = idw_interpolation(normalizedColor, colorValues, normalizedTarget, 2);
+
+        % Ensure all colors are in the valid range [0, 255]
+        interpolatedColors = max(0, min(255, interpolatedColors));
+        interpolatedColors = uint8(interpolatedColors);
+
+        % Debugging: Verify interpolated colors
+        disp('Interpolated Colors - Sample');
+        disp(interpolatedColors(1:10, :)); % Display the first 10 interpolated colors
+
+        % Denormalize the coordinates
+        denormalizedTarget = denormalize_coordinates(normalizedTarget, targetMin, targetRange);
+
+        % Create a new point cloud with the interpolated colors
+        mergedPointCloud = pointCloud(denormalizedTarget, 'Color', interpolatedColors);
+
+        % Display the merged point cloud in the existing window
+        cla(ax); % Clear the existing axes
+        pcshow(mergedPointCloud, 'Parent', ax);
+        axis(ax, 'equal');
+        f.UserData.pcData = mergedPointCloud; % Store the merged point cloud
+        f.UserData.originalPcData = mergedPointCloud; % Update the original data
+        disp(['Merge done. Total points in merged cloud: ', num2str(mergedPointCloud.Count)]);
+
+        % Check if all points have colors assigned
+        if all(~isnan(mergedPointCloud.Color), 'all')
+            disp('All points in the merged cloud have colors assigned.');
+        else
+            warning('Some points in the merged cloud do not have colors assigned.');
+        end
+
+        % Enable brushing and saving options
+        brush on;
+        axis(ax, 'equal');
+        title(ax, 'Merged Point Cloud');
+        f.UserData.saveAllMenu.Enable = 'on';
+        f.UserData.saveBrushedMenu.Enable = 'on';
+
+        elapsedTime = toc; % End timing
+        disp(['Elapsed time: ', num2str(elapsedTime), ' seconds']);
+
+    case 'Mesh File'
+        % Prompt user to select a mesh file
+        [file, path] = uigetfile({'*.off;*.obj;*.stl;*.dae', 'Open Mesh File'});
+        if isequal(file, 0)
+            return;
+        end
+        fullPath = fullfile(path, file);
+
+        % Determine the file extension
+        [~, ~, ext] = fileparts(fullPath);
+
+        % Read the mesh file based on its format
+        try
             switch ext
-                case '.ply'
-                    pc = pcread(fullPath);
-                case '.las'
-                    lasReader = lasFileReader(fullPath);
-                    lasData = read(lasReader);
-                    pc = pointCloud(lasData); % Assuming lasData is appropriately formatted
-                case '.pts'
-                    % Your logic for reading .pts goes here
-                case '.xyz'
-                    pcData = dlmread(fullPath);
-                    pc = pointCloud(pcData(:, 1:3));
-                case '.pcd' % Add this case for PCD files
-                    pc = readPCD(fullPath);
+                case '.off'
+                    [vertices, faces] = read_off(fullPath);
+                case '.obj'
+                    [vertices, faces] = read_obj(fullPath);
+                case '.stl'
+                    [vertices, faces] = read_stl(fullPath);
+                case '.dae'
+                    [vertices, faces] = read_dae(fullPath);
                 otherwise
-                    warning(['File format ', ext, ' is not supported.']);
-                    return;
-            end
-          if ~isempty(pc)
-    pcshow(pc, 'Parent', ax);
-    f.UserData.pcData = pc;
-    f.UserData.originalPcData = pc; % Store the original data
-
-    % Calculate the bounding box dimensions
-    pcLocation = pc.Location;
-    xMin = min(pcLocation(:, 1));
-    xMax = max(pcLocation(:, 1));
-    yMin = min(pcLocation(:, 2));
-    yMax = max(pcLocation(:, 2));
-    zMin = min(pcLocation(:, 3));
-    zMax = max(pcLocation(:, 3));
-    
-if ~isempty(pc)
-    pcshow(pc, 'Parent', ax);
-    f.UserData.pcData = pc;
-    f.UserData.originalPcData = pc; % Store the original data
-
-    % Calculate the bounding box dimensions
-    pcLocation = pc.Location;
-    xMin = min(pcLocation(:, 1));
-    xMax = max(pcLocation(:, 1));
-    yMin = min(pcLocation(:, 2));
-    yMax = max(pcLocation(:, 2));
-    zMin = min(pcLocation(:, 3));
-    zMax = max(pcLocation(:, 3));
-    
-    % Compute length and width in units of the point cloud
-    length = xMax - xMin;
-    width = yMax - yMin;
-    
-    % Display raw dimensions in a single line
-    disp(['Raw HxW: ', num2str(length), 'x', num2str(width), ' units']);
-    
-    % Assuming the data might be in millimeters if the dimensions seem too large
-    if length > .1 || width > .1
-        % Assume data might be in millimeters
-        lengthMeters = length / 1000;
-        widthMeters = width / 1000;
-    else
-        % Assume data is already in meters
-        lengthMeters = length;
-        widthMeters = width;
-    end
-    
-    % Convert from meters to inches
-    lengthInches = lengthMeters * 39.3701;
-    widthInches = widthMeters * 39.3701;
-    
-    % Calculate margin of error
-    lengthError = lengthInches * 0.02;
-    widthError = widthInches * 0.02;
-    
-    % Display the dimensions and margin of error in a single line
-    disp(['WxL: ', num2str(widthInches), 'x', num2str(lengthInches), ' inches ± ', num2str(widthError), 'x', num2str(lengthError), ' inches']);
-end
-          end
-          
-
-        case 'Merge Multiple'
-            tic; % Start timing
-            
-            [files, path] = uigetfile({'*.ply; *.las; *.laz; *.pts; *.xyz; *.asc', 'Merge Point Cloud Files'}, 'MultiSelect', 'on');
-            if isequal(files, 0)
-                return;
+                    error('Unsupported mesh file format.');
             end
 
-            % Choose which file is for XYZ and which is for Color
-            [indx, tf] = listdlg('ListString', files, 'SelectionMode', 'single', 'PromptString', 'Select a file for XYZ coordinates:');
-            if tf == 0
-                return;
-            end
-            targetFile = files{indx};
-            files(indx) = []; % Remove the selected file from the list
-            [indx, tf] = listdlg('ListString', files, 'SelectionMode', 'single', 'PromptString', 'Select a file for Color:');
-            if tf == 0
-                return;
-            end
-            colorFile = files{indx};
-
-            % Read the target file for XYZ coordinates
-            fullPath = fullfile(path, targetFile);
-            [~, ~, ext] = fileparts(fullPath);
-            switch ext
-                case '.ply'
-                    targetPc = pcread(fullPath);
-                case '.xyz'
-                    pcData = dlmread(fullPath);
-                    targetPc = pointCloud(pcData(:, 1:3));
-                otherwise
-                    warning(['File format ', ext, ' is not supported.']);
-                    return;
+            % Ensure the vertices are in the expected M-by-3 format
+            disp(['Vertices size: ', num2str(size(vertices))]); % Debugging
+            if size(vertices, 2) ~= 3
+                error('Vertices must be in M-by-3 format.');
             end
 
-            % Read the color file for color information
-            fullPath = fullfile(path, colorFile);
-            [~, ~, ext] = fileparts(fullPath);
-            switch ext
-                case '.ply'
-                    colorPc = pcread(fullPath);
-                case '.xyz'
-                    colorData = dlmread(fullPath);
-                    colorPc = pointCloud(zeros(size(colorData, 1), 3), 'Color', colorData);
-                otherwise
-                    warning(['File format ', ext, ' is not supported.']);
-                    return;
-            end
+            % Create a point cloud from vertices
+            pc = pointCloud(vertices);
 
-            % Align the color point cloud to the XYZ point cloud
-            disp('Starting alignment...');
-            [tform, ~, rmse] = pcregrigid(colorPc, targetPc, 'Metric', 'pointToPoint', 'Extrapolate', true);
-            disp(['Alignment done. RMSE: ', num2str(rmse)]);
-
-            % Apply transformation to the color point cloud
-            colorPcTransformed = pctransform(colorPc, tform);
-            disp('Color point cloud transformed.');
-
-            % Extract locations and colors
-            targetLocations = double(targetPc.Location);
-            colorLocations = double(colorPcTransformed.Location);
-            colorValues = double(colorPcTransformed.Color);
-
-            % Visualize aligned point clouds before merging
-            figure;
-            subplot(1, 2, 1);
-            pcshow(targetPc);
-            title('Target Point Cloud');
-            subplot(1, 2, 2);
-            pcshow(colorPcTransformed);
-            title('Transformed Color Point Cloud');
-
-            % Normalize the coordinates
-            [normalizedTarget, normalizedColor, targetMin, targetRange] = normalize_coordinates(targetLocations, colorLocations);
-
-            % Debugging: Check normalization values before and after
-            disp('Target Locations - Before Normalization');
-            disp([min(targetLocations); max(targetLocations)]);
-            disp('Color Locations - Before Normalization');
-            disp([min(colorLocations); max(colorLocations)]);
-            disp('Target Locations - After Normalization');
-            disp([min(normalizedTarget); max(normalizedTarget)]);
-            disp('Color Locations - After Normalization');
-            disp([min(normalizedColor); max(normalizedColor)]);
-
-            % Perform IDW interpolation
-            disp('Performing IDW interpolation...');
-            interpolatedColors = idw_interpolation(normalizedColor, colorValues, normalizedTarget, 2);
-
-            % Ensure all colors are in the valid range [0, 255]
-            interpolatedColors = max(0, min(255, interpolatedColors));
-            interpolatedColors = uint8(interpolatedColors);
-
-            % Debugging: Verify interpolated colors
-            disp('Interpolated Colors - Sample');
-            disp(interpolatedColors(1:10, :)); % Display the first 10 interpolated colors
-
-            % Denormalize the coordinates
-            denormalizedTarget = denormalize_coordinates(normalizedTarget, targetMin, targetRange);
-
-            % Create a new point cloud with the interpolated colors
-            mergedPointCloud = pointCloud(denormalizedTarget, 'Color', interpolatedColors);
-
-            % Display the merged point cloud in the existing window
+            % Display the point cloud in the existing window
             cla(ax); % Clear the existing axes
-            pcshow(mergedPointCloud, 'Parent', ax);
+            pcshow(pc, 'Parent', ax);
             axis(ax, 'equal');
-            f.UserData.pcData = mergedPointCloud; % Store the merged point cloud
-            f.UserData.originalPcData = mergedPointCloud; % Update the original data
-            disp(['Merge done. Total points in merged cloud: ', num2str(mergedPointCloud.Count)]);
+            f.UserData.pcData = pc; % Store the point cloud
+            f.UserData.originalPcData = pc; % Update the original data
+            title(ax, 'Mesh Point Cloud');
 
-            % Check if all points have colors assigned
-            if all(~isnan(mergedPointCloud.Color), 'all')
-                disp('All points in the merged cloud have colors assigned.');
-            else
-                warning('Some points in the merged cloud do not have colors assigned.');
-            end
-
-            % Enable brushing and saving options
-            brush on;
-            axis(ax, 'equal');
-            title(ax, 'Merged Point Cloud');
-            f.UserData.saveAllMenu.Enable = 'on';
-            f.UserData.saveBrushedMenu.Enable = 'on';
-            
-            elapsedTime = toc; % End timing
-            disp(['Elapsed time: ', num2str(elapsedTime), ' seconds']);
-
-         case 'Mesh File'
-            % Prompt user to select a mesh file
-            [file, path] = uigetfile({'*.off;*.obj;*.stl;*.dae', 'Open Mesh File'});
-            if isequal(file, 0)
-                return;
-            end
-            fullPath = fullfile(path, file);
-
-            % Determine the file extension
-            [~, ~, ext] = fileparts(fullPath);
-
-            % Read the mesh file based on its format
-            try
-                switch ext
-                    case '.off'
-                        [vertices, faces] = read_off(fullPath);
-                    case '.obj'
-                        [vertices, faces] = read_obj(fullPath);
-                    case '.stl'
-                        [vertices, faces] = read_stl(fullPath);
-                    case '.dae'
-                        [vertices, faces] = read_dae(fullPath);
-                    otherwise
-                        error('Unsupported mesh file format.');
-                end
-                
-                % Ensure the vertices are in the expected M-by-3 format
-                disp(['Vertices size: ', num2str(size(vertices))]); % Debugging
-                if size(vertices, 2) ~= 3
-                    error('Vertices must be in M-by-3 format.');
-                end
-                
-                % Create a point cloud from vertices
-                pc = pointCloud(vertices);
-
-                % Display the point cloud in the existing window
-                cla(ax); % Clear the existing axes
-                pcshow(pc, 'Parent', ax);
-                axis(ax, 'equal');
-                f.UserData.pcData = pc; % Store the point cloud
-                f.UserData.originalPcData = pc; % Update the original data
-                title(ax, 'Mesh Point Cloud');
-
-                % Display a message indicating success
-                disp('Mesh file successfully loaded and displayed.');
-            catch ME
-                warning(['Failed to read mesh file: ', ME.message]);
-            end
-        otherwise
-            warning('Unknown open option');
-    end
+            % Display a message indicating success
+            disp('Mesh file successfully loaded and displayed.');
+        catch ME
+            warning(['Failed to read mesh file: ', ME.message]);
+        end
+    otherwise
+        warning('Unknown open option');
+end
 end
 
 % Helper functions to read mesh file formats
 function [vertices, faces] = read_off(filename)
-    fid = fopen(filename, 'r');
-    if fid == -1
-        error('Cannot open the file.');
-    end
+fid = fopen(filename, 'r');
+if fid == -1
+    error('Cannot open the file.');
+end
 
-    header = fgetl(fid);
-    if ~strcmp(header, 'OFF')
-        error('Not a valid OFF file.');
-    end
+header = fgetl(fid);
+if ~strcmp(header, 'OFF')
+    error('Not a valid OFF file.');
+end
 
-    counts = fscanf(fid, '%d %d %d', 3);
-    numVertices = counts(1);
-    numFaces = counts(2);
+counts = fscanf(fid, '%d %d %d', 3);
+numVertices = counts(1);
+numFaces = counts(2);
 
-    vertices = fscanf(fid, '%f %f %f', [3, numVertices])';
-    faces = fscanf(fid, '%d %d %d %d', [4, numFaces]);
-    faces = faces(2:4, :)' + 1;
+vertices = fscanf(fid, '%f %f %f', [3, numVertices])';
+faces = fscanf(fid, '%d %d %d %d', [4, numFaces]);
+faces = faces(2:4, :)' + 1;
 
-    fclose(fid);
+fclose(fid);
 end
 
 function [vertices, faces] = read_obj(filename)
-    % Read vertices and faces from .obj file
-    fid = fopen(filename, 'r');
-    vertices = [];
-    faces = [];
-    while ~feof(fid)
-        line = fgetl(fid);
-        if startsWith(line, 'v ')
-            vertices = [vertices; sscanf(line(3:end), '%f %f %f')'];
-        elseif startsWith(line, 'f ')
-            faces = [faces; sscanf(line(3:end), '%d %d %d')'];
-        end
+% Read vertices and faces from .obj file
+fid = fopen(filename, 'r');
+vertices = [];
+faces = [];
+while ~feof(fid)
+    line = fgetl(fid);
+    if startsWith(line, 'v ')
+        vertices = [vertices; sscanf(line(3:end), '%f %f %f')'];
+    elseif startsWith(line, 'f ')
+        faces = [faces; sscanf(line(3:end), '%d %d %d')'];
     end
-    fclose(fid);
+end
+fclose(fid);
 end
 
 function [vertices, faces] = read_stl(filename)
-    % Read vertices and faces from .stl file
-    [stl_data, stl_faces, stl_normals] = stlread(filename); % Use MATLAB's built-in stlread function
-    vertices = stl_data.Points;
-    faces = stl_data.ConnectivityList;
+% Read vertices and faces from .stl file
+[stl_data, stl_faces, stl_normals] = stlread(filename); % Use MATLAB's built-in stlread function
+vertices = stl_data.Points;
+faces = stl_data.ConnectivityList;
 end
 
 function [vertices, faces] = read_dae(filename)
-    % Read vertices and faces from .dae file using xmlread and custom parsing
-    doc = xmlread(filename);
-    vertices = parse_vertices(doc);
-    faces = parse_faces(doc);
+% Read vertices and faces from .dae file using xmlread and custom parsing
+doc = xmlread(filename);
+vertices = parse_vertices(doc);
+faces = parse_faces(doc);
 end
 
 % Custom parsing functions for .dae files
 function vertices = parse_vertices(doc)
-    % Extract vertices from .dae file
-    verticesNode = doc.getElementsByTagName('float_array').item(0);
-    verticesText = char(verticesNode.getFirstChild.getData);
-    vertices = sscanf(verticesText, '%f');
-    vertices = reshape(vertices, 3, [])';
+% Extract vertices from .dae file
+verticesNode = doc.getElementsByTagName('float_array').item(0);
+verticesText = char(verticesNode.getFirstChild.getData);
+vertices = sscanf(verticesText, '%f');
+vertices = reshape(vertices, 3, [])';
 end
 
 function faces = parse_faces(doc)
-    % Extract faces from .dae file
-    facesNode = doc.getElementsByTagName('p').item(0);
-    facesText = char(facesNode.getFirstChild.getData);
-    faces = sscanf(facesText, '%d');
-    faces = reshape(faces, 3, [])' + 1; % Assuming faces are triangles
+% Extract faces from .dae file
+facesNode = doc.getElementsByTagName('p').item(0);
+facesText = char(facesNode.getFirstChild.getData);
+faces = sscanf(facesText, '%d');
+faces = reshape(faces, 3, [])' + 1; % Assuming faces are triangles
 end
 
 
 function [normalizedTarget, normalizedColor, targetMin, targetRange] = normalize_coordinates(target, color)
-    % Determine the ranges of the coordinates
-    minTarget = min(target, [], 1);
-    maxTarget = max(target, [], 1);
-    rangeTarget = maxTarget - minTarget;
-    
-    minColor = min(color, [], 1);
-    maxColor = max(color, [], 1);
-    rangeColor = maxColor - minColor;
-    
-    % Normalize the coordinates to the range [0, 1]
-    normalizedTarget = (target - minTarget) ./ rangeTarget;
-    normalizedColor = (color - minColor) ./ rangeColor;
-    
-    % Return min and range for inverse normalization later
-    targetMin = minTarget;
-    targetRange = rangeTarget;
+% Determine the ranges of the coordinates
+minTarget = min(target, [], 1);
+maxTarget = max(target, [], 1);
+rangeTarget = maxTarget - minTarget;
+
+minColor = min(color, [], 1);
+maxColor = max(color, [], 1);
+rangeColor = maxColor - minColor;
+
+% Normalize the coordinates to the range [0, 1]
+normalizedTarget = (target - minTarget) ./ rangeTarget;
+normalizedColor = (color - minColor) ./ rangeColor;
+
+% Return min and range for inverse normalization later
+targetMin = minTarget;
+targetRange = rangeTarget;
 end
 
 function [denormalizedTarget] = denormalize_coordinates(normalized, minTarget, rangeTarget)
-    % Denormalize the coordinates back to their original scale
-    denormalizedTarget = normalized .* rangeTarget + minTarget;
+% Denormalize the coordinates back to their original scale
+denormalizedTarget = normalized .* rangeTarget + minTarget;
 end
 
 function interpolatedColors = idw_interpolation(colorLocations, colorValues, targetLocations, power)
-    % Perform IDW interpolation
-    numPoints = size(targetLocations, 1);
-    interpolatedColors = zeros(numPoints, 3);
-    
-    parfor i = 1:numPoints
-        distances = sqrt(sum((colorLocations - targetLocations(i, :)).^2, 2));
-        weights = 1 ./ (distances .^ power);
-        weights = weights / sum(weights);
-        interpolatedColors(i, :) = sum(colorValues .* weights, 1);
+% Perform IDW interpolation
+numPoints = size(targetLocations, 1);
+interpolatedColors = zeros(numPoints, 3);
+
+parfor i = 1:numPoints
+    distances = sqrt(sum((colorLocations - targetLocations(i, :)).^2, 2));
+    weights = 1 ./ (distances .^ power);
+    weights = weights / sum(weights);
+    interpolatedColors(i, :) = sum(colorValues .* weights, 1);
+end
+end
+
+function merge_segments_callback(~, ~, f, ax)
+% Initialize arrays to store merged data
+mergedXYZ = [];
+mergedColor = [];
+
+while true
+    % Allow user to select multiple segment files
+    [files, path] = uigetfile({'*.ply; *.las; *.laz; *.pts; *.xyz; *.asc', 'Select Segment Files'}, 'MultiSelect', 'on');
+    if isequal(files, 0), break; end
+
+    if ischar(files) % If a single file is selected
+        files = {files};
+    end
+
+    % Loop through each selected segment file
+    for i = 1:length(files)
+        segmentFile = fullfile(path, files{i});
+        [~, ~, ext] = fileparts(segmentFile);
+        switch ext
+            case '.ply'
+                segmentPc = pcread(segmentFile);
+            case '.xyz'
+                segmentData = readmatrix(segmentFile, 'FileType', 'text');
+                segmentPc = pointCloud(segmentData(:, 1:3));
+                % Add other cases if needed
+            otherwise
+                warning(['File format ', ext, ' is not supported.']);
+                continue;
+        end
+        % Concatenate the XYZ and color data
+        mergedXYZ = [mergedXYZ; segmentPc.Location];
+        mergedColor = [mergedColor; segmentPc.Color];
+    end
+
+    % Prompt user to continue or merge
+    choice = questdlg('Do you want to select more segments or merge the current selection?', ...
+        'Merge Segments', ...
+        'Select More', 'Merge Now', 'Merge Now');
+    if strcmp(choice, 'Merge Now')
+        break;
     end
 end
- 
 
+if isempty(mergedXYZ)
+    errordlg('No segments were selected for merging.', 'Error');
+    return;
+end
 
+% Create a new point cloud with the merged data
+mergedPointCloud = pointCloud(mergedXYZ, 'Color', mergedColor);
+% Display merged point cloud
+pcshow(mergedPointCloud, 'Parent', ax);
+axis(ax, 'equal');
+f.UserData.pcData = mergedPointCloud; % Ensure pcData is set here
+f.UserData.originalPcData = mergedPointCloud; % Update original data
+disp(['Merge done. Total points in merged cloud: ', num2str(mergedPointCloud.Count)]);
+brush on;
+axis(ax, 'equal');
+title(ax, 'Merged Segment Point Cloud');
+f.UserData.saveAllMenu.Enable = 'on';
+f.UserData.saveBrushedMenu.Enable = 'on';
+end
 
-
-    function merge_segments_callback(~, ~, f, ax)
-        % Initialize arrays to store merged data
-        mergedXYZ = [];
-        mergedColor = [];
-
-        while true
-            % Allow user to select multiple segment files
-            [files, path] = uigetfile({'*.ply; *.las; *.laz; *.pts; *.xyz; *.asc', 'Select Segment Files'}, 'MultiSelect', 'on');
-            if isequal(files, 0), break; end
-
-            if ischar(files) % If a single file is selected
-                files = {files};
-            end
-
-            % Loop through each selected segment file
-            for i = 1:length(files)
-                segmentFile = fullfile(path, files{i});
-                [~, ~, ext] = fileparts(segmentFile);
-                switch ext
-                    case '.ply'
-                        segmentPc = pcread(segmentFile);
-                    case '.xyz'
-                        segmentData = readmatrix(segmentFile, 'FileType', 'text');
-                        segmentPc = pointCloud(segmentData(:, 1:3));
-                        % Add other cases if needed
-                    otherwise
-                        warning(['File format ', ext, ' is not supported.']);
-                        continue;
-                end
-                % Concatenate the XYZ and color data
-                mergedXYZ = [mergedXYZ; segmentPc.Location];
-                mergedColor = [mergedColor; segmentPc.Color];
-            end
-
-            % Prompt user to continue or merge
-            choice = questdlg('Do you want to select more segments or merge the current selection?', ...
-                'Merge Segments', ...
-                'Select More', 'Merge Now', 'Merge Now');
-            if strcmp(choice, 'Merge Now')
-                break;
-            end
+function save_ply_callback(~, ~, f, ax, saveMode)
+pcData = f.UserData.pcData;
+% Initialize file and path variables
+file = [];
+path = [];
+if isempty(pcData)
+    errordlg('No data to save!', 'Error');
+    return;
+end
+% Determine the file extension based on saveMode
+switch saveMode
+    case 'all'
+        [file, path] = uiputfile('*.ply', 'Save PLY File');
+    case 'brushed'
+        [file, path] = uiputfile('*.ply', 'Save PLY File');
+    otherwise
+        errordlg('Unknown save mode!', 'Error');
+        if file == 0
+            return; 'No Point'
         end
-
-        if isempty(mergedXYZ)
-            errordlg('No segments were selected for merging.', 'Error');
-            return;
-        end
-
-        % Create a new point cloud with the merged data
-        mergedPointCloud = pointCloud(mergedXYZ, 'Color', mergedColor);
-        % Display merged point cloud
-        pcshow(mergedPointCloud, 'Parent', ax);
-        axis(ax, 'equal');
-        f.UserData.pcData = mergedPointCloud; % Ensure pcData is set here
-        f.UserData.originalPcData = mergedPointCloud; % Update original data
-        disp(['Merge done. Total points in merged cloud: ', num2str(mergedPointCloud.Count)]);
-        brush on;
-        axis(ax, 'equal');
-        title(ax, 'Merged Segment Point Cloud');
-        f.UserData.saveAllMenu.Enable = 'on';
-        f.UserData.saveBrushedMenu.Enable = 'on';
-    end
-
-    function save_ply_callback(~, ~, f, ax, saveMode)
-        pcData = f.UserData.pcData;
-        % Initialize file and path variables
-        file = [];
-        path = [];
-        if isempty(pcData)
-            errordlg('No data to save!', 'Error');
-            return;
-        end
-        % Determine the file extension based on saveMode
-        switch saveMode
-            case 'all'
-                [file, path] = uiputfile('*.ply', 'Save PLY File');
-            case 'brushed'
-                [file, path] = uiputfile('*.ply', 'Save PLY File');
-            otherwise
-                errordlg('Unknown save mode!', 'Error');
-                if file == 0
-                    return; 'No Point'
-                end
-        end
-        fullPath = fullfile(path, file);
-        if strcmp(saveMode, 'brushed')
-            % Get brushed data
-            axChildren = get(ax, 'Children');
-            brushedIndices = [];
-            for child = 1:length(axChildren)
-                if isprop(axChildren(child), 'BrushData')
-                    currentBrushedIndices = find(axChildren(child).BrushData);
-                    brushedIndices = [brushedIndices; currentBrushedIndices];
-                end
-            end
-            if isempty(brushedIndices)
-                errordlg('No points were brushed!', 'Error');
-                return;
-            end
-            % Display the number of brushed points
-            disp(['Number of brushed points: ', num2str(length(brushedIndices))]);
-            pcData = select(f.UserData.pcData, brushedIndices); % This also keeps RGB and intensity data intact
-        end
-        % Save the data based on file extension
-        [~, ~, option] = fileparts(fullPath);
-        switch option
-            case '.ply'
-                pcwrite(pcData, fullPath, 'Encoding', 'ascii');
-            case '.las'
-                lasFileWriter(fullPath, pcData.Location, 'Color', uint8(pcData.Color));
-            case '.laz'
-                % TODO: Implement logic for saving as .laz if different from .las
-                warning('LAZ format not yet supported.');
-            case '.pts'
-                % Save in .pts format
-                dataToWrite = [pcData.Location, double(pcData.Color)];
-                writematrix(dataToWrite, fullPath, 'Delimiter', ' ');
-            case '.xyz'
-                % Save in .xyz format
-                writematrix(pcData.Location, fullPath, 'Delimiter', ' ');
-            case '.asc'
-                % Save in .asc format
-                fileID = fopen(fullPath, 'w');
-                for i = 1:size(pcData.Location, 1)
-                    fprintf(fileID, '%f %f %f\n', pcData.Location(i, 1), pcData.Location(i, 2), pcData.Location(i, 3));
-                end
-                fclose(fileID);
-            otherwise
-                errordlg('Unsupported file type!', 'Error');
+end
+fullPath = fullfile(path, file);
+if strcmp(saveMode, 'brushed')
+    % Get brushed data
+    axChildren = get(ax, 'Children');
+    brushedIndices = [];
+    for child = 1:length(axChildren)
+        if isprop(axChildren(child), 'BrushData')
+            currentBrushedIndices = find(axChildren(child).BrushData);
+            brushedIndices = [brushedIndices; currentBrushedIndices];
         end
     end
+    if isempty(brushedIndices)
+        errordlg('No points were brushed!', 'Error');
+        return;
+    end
+    % Display the number of brushed points
+    disp(['Number of brushed points: ', num2str(length(brushedIndices))]);
+    pcData = select(f.UserData.pcData, brushedIndices); % This also keeps RGB and intensity data intact
+end
+% Save the data based on file extension
+[~, ~, option] = fileparts(fullPath);
+switch option
+    case '.ply'
+        pcwrite(pcData, fullPath, 'Encoding', 'ascii');
+    case '.las'
+        lasFileWriter(fullPath, pcData.Location, 'Color', uint8(pcData.Color));
+    case '.laz'
+        % TODO: Implement logic for saving as .laz if different from .las
+        warning('LAZ format not yet supported.');
+    case '.pts'
+        % Save in .pts format
+        dataToWrite = [pcData.Location, double(pcData.Color)];
+        writematrix(dataToWrite, fullPath, 'Delimiter', ' ');
+    case '.xyz'
+        % Save in .xyz format
+        writematrix(pcData.Location, fullPath, 'Delimiter', ' ');
+    case '.asc'
+        % Save in .asc format
+        fileID = fopen(fullPath, 'w');
+        for i = 1:size(pcData.Location, 1)
+            fprintf(fileID, '%f %f %f\n', pcData.Location(i, 1), pcData.Location(i, 2), pcData.Location(i, 3));
+        end
+        fclose(fileID);
+    otherwise
+        errordlg('Unsupported file type!', 'Error');
+end
+end
