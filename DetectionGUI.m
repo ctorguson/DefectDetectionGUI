@@ -490,131 +490,133 @@ switch option
         end
 
     case 'Merge Multiple'
+    [files, path] = uigetfile({'*.ply; *.las; *.laz; *.pts; *.xyz; *.asc', 'Merge Point Cloud Files'}, 'MultiSelect', 'on');
+    if isequal(files, 0)
+        return;
+    end
 
-        [files, path] = uigetfile({'*.ply; *.las; *.laz; *.pts; *.xyz; *.asc', 'Merge Point Cloud Files'}, 'MultiSelect', 'on');
-        if isequal(files, 0)
+    % Choose which file is for XYZ and which is for Color
+    [indx, tf] = listdlg('ListString', files, 'SelectionMode', 'single', 'PromptString', 'Select a file for XYZ coordinates:');
+    if tf == 0
+        return;
+    end
+    targetFile = files{indx};
+    files(indx) = []; % Remove the selected file from the list
+    [indx, tf] = listdlg('ListString', files, 'SelectionMode', 'single', 'PromptString', 'Select a file for Color:');
+    if tf == 0
+        return;
+    end
+    colorFile = files{indx};
+
+    % Read the target file for XYZ coordinates
+    fullPath = fullfile(path, targetFile);
+    [~, ~, ext] = fileparts(fullPath);
+    switch ext
+        case '.ply'
+            targetPc = pcread(fullPath);
+        case '.xyz'
+            pcData = dlmread(fullPath);
+            targetPc = pointCloud(pcData(:, 1:3));
+        otherwise
+            warning(['File format ', ext, ' is not supported.']);
             return;
-        end
+    end
 
-        % Choose which file is for XYZ and which is for Color
-        [indx, tf] = listdlg('ListString', files, 'SelectionMode', 'single', 'PromptString', 'Select a file for XYZ coordinates:');
-        if tf == 0
+    % Read the color file for color information
+    fullPath = fullfile(path, colorFile);
+    [~, ~, ext] = fileparts(fullPath);
+    switch ext
+        case '.ply'
+            colorPc = pcread(fullPath);
+        case '.xyz'
+            colorData = dlmread(fullPath);
+            colorPc = pointCloud(zeros(size(colorData, 1), 3), 'Color', colorData);
+        otherwise
+            warning(['File format ', ext, ' is not supported.']);
             return;
-        end
-        targetFile = files{indx};
-        files(indx) = []; % Remove the selected file from the list
-        [indx, tf] = listdlg('ListString', files, 'SelectionMode', 'single', 'PromptString', 'Select a file for Color:');
-        if tf == 0
-            return;
-        end
-        colorFile = files{indx};
+    end
 
-        % Read the target file for XYZ coordinates
-        fullPath = fullfile(path, targetFile);
-        [~, ~, ext] = fileparts(fullPath);
-        switch ext
-            case '.ply'
-                targetPc = pcread(fullPath);
-            case '.xyz'
-                pcData = dlmread(fullPath);
-                targetPc = pointCloud(pcData(:, 1:3));
-            otherwise
-                warning(['File format ', ext, ' is not supported.']);
-                return;
-        end
+    % Align the color point cloud to the XYZ point cloud
+    disp('Starting alignment...');
+    [tform, ~, rmse] = pcregrigid(colorPc, targetPc, 'Metric', 'pointToPoint', 'Extrapolate', true);
+    disp(['Alignment done. RMSE: ', num2str(rmse)]);
 
-        % Read the color file for color information
-        fullPath = fullfile(path, colorFile);
-        [~, ~, ext] = fileparts(fullPath);
-        switch ext
-            case '.ply'
-                colorPc = pcread(fullPath);
-            case '.xyz'
-                colorData = dlmread(fullPath);
-                colorPc = pointCloud(zeros(size(colorData, 1), 3), 'Color', colorData);
-            otherwise
-                warning(['File format ', ext, ' is not supported.']);
-                return;
-        end
+    % Apply transformation to the color point cloud
+    colorPcTransformed = pctransform(colorPc, tform);
+    disp('Color point cloud transformed.');
 
-        % Align the color point cloud to the XYZ point cloud
-        disp('Starting alignment...');
-        [tform, ~, rmse] = pcregrigid(colorPc, targetPc, 'Metric', 'pointToPoint', 'Extrapolate', true);
-        disp(['Alignment done. RMSE: ', num2str(rmse)]);
+    % Extract locations and colors
+    targetLocations = double(targetPc.Location);
+    colorLocations = double(colorPcTransformed.Location);
+    colorValues = double(colorPcTransformed.Color);
 
-        % Apply transformation to the color point cloud
-        colorPcTransformed = pctransform(colorPc, tform);
-        disp('Color point cloud transformed.');
+    % Visualize aligned point clouds before merging
+    figure;
+    subplot(1, 2, 1);
+    pcshow(targetPc);
+    title('Target Point Cloud');
+    subplot(1, 2, 2);
+    pcshow(colorPcTransformed);
+    title('Transformed Color Point Cloud');
 
-        % Extract locations and colors
-        targetLocations = double(targetPc.Location);
-        colorLocations = double(colorPcTransformed.Location);
-        colorValues = double(colorPcTransformed.Color);
+    % Normalize the coordinates
+    [normalizedTarget, normalizedColor, targetMin, targetRange] = normalize_coordinates(targetLocations, colorLocations);
 
-        % Visualize aligned point clouds before merging
-        figure;
-        subplot(1, 2, 1);
-        pcshow(targetPc);
-        title('Target Point Cloud');
-        subplot(1, 2, 2);
-        pcshow(colorPcTransformed);
-        title('Transformed Color Point Cloud');
+    % Debugging: Check normalization values before and after
+    % disp('Target Locations - Before Normalization');
+    % disp([min(targetLocations); max(targetLocations)]);
+    % disp('Color Locations - Before Normalization');
+    % disp([min(colorLocations); max(colorLocations)]);
+    % disp('Target Locations - After Normalization');
+    % disp([min(normalizedTarget); max(normalizedTarget)]);
+    % disp('Color Locations - After Normalization');
+    % disp([min(normalizedColor); max(normalizedColor)]);
 
-        % Normalize the coordinates
-        [normalizedTarget, normalizedColor, targetMin, targetRange] = normalize_coordinates(targetLocations, colorLocations);
+    % Perform IDW interpolation
+    disp('Performing IDW interpolation...');
+    interpolatedColors = idw_interpolation(normalizedColor, colorValues, normalizedTarget, 2);
 
-        % Debugging: Check normalization values before and after
-        disp('Target Locations - Before Normalization');
-        disp([min(targetLocations); max(targetLocations)]);
-        disp('Color Locations - Before Normalization');
-        disp([min(colorLocations); max(colorLocations)]);
-        disp('Target Locations - After Normalization');
-        disp([min(normalizedTarget); max(normalizedTarget)]);
-        disp('Color Locations - After Normalization');
-        disp([min(normalizedColor); max(normalizedColor)]);
+    % Ensure all colors are in the valid range [0, 255]
+    interpolatedColors = max(0, min(255, interpolatedColors));
+    interpolatedColors = uint8(interpolatedColors);
 
-        % Perform IDW interpolation
-        disp('Performing IDW interpolation...');
-        interpolatedColors = idw_interpolation(normalizedColor, colorValues, normalizedTarget, 2);
+    % Debugging: Verify interpolated colors
+    % disp('Interpolated Colors - Sample');
+    % disp(interpolatedColors(1:10, :)); % Display the first 10 interpolated colors
 
-        % Ensure all colors are in the valid range [0, 255]
-        interpolatedColors = max(0, min(255, interpolatedColors));
-        interpolatedColors = uint8(interpolatedColors);
+    % Denormalize the coordinates
+    denormalizedTarget = denormalize_coordinates(normalizedTarget, targetMin, targetRange);
 
-        % Debugging: Verify interpolated colors
-        disp('Interpolated Colors - Sample');
-        disp(interpolatedColors(1:10, :)); % Display the first 10 interpolated colors
+    % Create a new point cloud with the interpolated colors
+    mergedPointCloud = pointCloud(denormalizedTarget, 'Color', interpolatedColors);
 
-        % Denormalize the coordinates
-        denormalizedTarget = denormalize_coordinates(normalizedTarget, targetMin, targetRange);
+    % Display the merged point cloud in the existing window
+    cla(ax); % Clear the existing axes to avoid layering issues
+    pcshow(mergedPointCloud, 'Parent', ax); % Display in the main axes
+    axis(ax, 'equal'); % Set the axis equal for correct visualization
 
-        % Create a new point cloud with the interpolated colors
-        mergedPointCloud = pointCloud(denormalizedTarget, 'Color', interpolatedColors);
+    % Update the GUI's stored point cloud data
+    f.UserData.pcData = mergedPointCloud; % Store the merged point cloud data in GUI
+    f.UserData.originalPcData = mergedPointCloud; % Update the original data
 
-        % Display the merged point cloud in the existing window
-        cla(ax); % Clear the existing axes
-        pcshow(mergedPointCloud, 'Parent', ax);
-        axis(ax, 'equal');
-        f.UserData.pcData = mergedPointCloud; % Store the merged point cloud
-        f.UserData.originalPcData = mergedPointCloud; % Update the original data
-        disp(['Merge done. Total points in merged cloud: ', num2str(mergedPointCloud.Count)]);
+    % Set the title to indicate the merged point cloud
+    title(ax, 'Merged Point Cloud');
 
-        % Check if all points have colors assigned
-        if all(~isnan(mergedPointCloud.Color), 'all')
-            disp('All points in the merged cloud have colors assigned.');
-        else
-            warning('Some points in the merged cloud do not have colors assigned.');
-        end
+    % Check if all points have colors assigned
+    if all(~isnan(mergedPointCloud.Color), 'all')
+        disp('All points in the merged cloud have colors assigned.');
+    else
+        warning('Some points in the merged cloud do not have colors assigned.');
+    end
 
-        % Enable brushing and saving options
-        brush on;
-        axis(ax, 'equal');
-        title(ax, 'Merged Point Cloud');
-        f.UserData.saveAllMenu.Enable = 'on';
-        f.UserData.saveBrushedMenu.Enable = 'on';
+    % Enable brushing and saving options
+    brush on;
+    axis(ax, 'equal');
+    f.UserData.saveAllMenu.Enable = 'on';
+    f.UserData.saveBrushedMenu.Enable = 'on';
 
-        elapsedTime = toc; % End timing
-        disp(['Elapsed time: ', num2str(elapsedTime), ' seconds']);
+    elapsedTime = toc; % End timing
+    disp(['Elapsed time: ', num2str(elapsedTime), ' seconds']);
 
     case 'Mesh File'
         % Prompt user to select a mesh file
