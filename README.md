@@ -3,31 +3,33 @@ Overview
 This MATLAB-based GUI enables users to load, visualize, and process point cloud data. The GUI includes tools for interactive 3D visualization, merging of multiple point clouds, meshing, densification, and flattening of surfaces, making it particularly useful for applications in 3D modeling, quality control, and visual inspection.
 Features
 
-    Point Cloud Loading: Supports, consumes and saves .ply files. 
+    Open: Point Cloud Loading Displays, consumes and saves .ply files. 
     
-    Merge Multiple: Merges multiple point clouds of the same object, aligns colors from one cloud onto another with precise interpolation. 
+    Merge Multiple: Merges multiple point clouds of the same object, registers two clouds of the       same object to each other and interpolates colors from one cloud onto the other with precise       interpolation. 
     
-    Flattening Surface Fit: Flattens curved point clouds based on a third-order               polynomial fit, offering options for outlier removal and re-fitting without outliers.
+    Flatten: Surface Fit Flattens curved point clouds based on a third-order polynomial fit,           offering options for outlier removal and re-fitting without outliers.
     
-    Densification: Uses interpolation to increase point density within a cloud.
+    Densifiy: Uses interpolation to increase point density within a cloud.
     
-    3D Grid: Enhances visualization with customizable grid overlays.
+    Grid: Enhances visualization with customizable grid overlays.
     
     Depth: Maps the selected cloud by height data, useful for finding indentations. 
+
+    Reset: Resets cloud to its original state upon opening. 
     
-    Save Options: Saves point cloud data, with the option to save either all points or only those selected through brushing.
+    Save Options: Saves point cloud data, with the option to save either all points or only those      selected through brushing.
 
 Future versions:
 
-    Defect Detection: Highlights potential defect regions in the point cloud using color coding based on height values.
+    Defect: Highlights potential defect regions in the point cloud using color coding based on         height values.
 
     Support multiple formats, including .ply, .las, .xyz, .pts, and .pcd. 
 
-    Mesh Generation: Opens an existing mesh and generates and visualizes a mesh from a point cloud using Delaunay triangulation.
+    Mesh Generation: Opens an existing mesh and generates and visualizes a mesh from a point cloud     using Delaunay triangulation.
     
 Installation
  
-    Setup: Clone the repository and add .txt and .cpp files to a project in vscode or like software. Add .m files to MATLAB’s path, and run GUI(). 
+    Setup: Clone the repository and add .txt and .cpp files to a project in vscode or like             software. Add .m files to MATLAB’s path, and run GUI(). 
 
 Usage
 
@@ -52,16 +54,16 @@ Usage
                  interpolating the color data from the file chosen for color onto the 
                  xyz data of the file chosen for xyz data. 
                 
-                "Merge Sections" (Stitch together peices of a cloud): If two adjacent 
-                sections of a cloud have been separated, this function will stich them 
-                back together. This is useful for larger parts that need to be 
-                segmented. 
-                Processing may be time consuming and so in some cases you may want to     
-                work on sections individually and then stitch them back together after 
-                manipulation. 
+                "Merge Segments" (Stitch together peices of a cloud): If two adjacent 
+                 sections of a cloud have been separated, this function will stich them 
+                 back together. This is useful for larger parts that need to be 
+                 segmented. 
+                 Processing may be time consuming and so in some cases you may want to     
+                 work on sections individually and then stitch them back together after 
+                 manipulation. 
     
     "Visualization" Dropdown Menu: 
-                "Grid" Makes a grid on the point cloud for inspection or brushing a                       smaller gridspace. This feature allows the user to neatly break a part 
+                "Grid" Makes a grid on the point cloud for inspection or brushing a                                smaller gridspace. This feature allows the user to neatly break a part 
                 into smaller sections. Simply apply grid to the part and use the brush 
                 feature to brush and then the save brushed points feature to save that 
                 section as a new file. These sections can be stiched back together later 
@@ -72,7 +74,7 @@ Usage
                 "Defect" To locate possible defects in a part using SQUID, open the part 
                 and select the "Defect" fuction.
                 
-                "Depth" To map the selected cloud by height data, useful for finding                     indentations. This is most useful when the cloud is first flattened or 
+                "Depth" To map the selected cloud by height data, useful for finding                               indentations. This is most useful when the cloud is first flattened or 
                 laid flat on its axis usin the "Flat" or "Plane" functions
 
                 "Plane" Adjusts the cloud so that it lays neatly on its plane if it is 
